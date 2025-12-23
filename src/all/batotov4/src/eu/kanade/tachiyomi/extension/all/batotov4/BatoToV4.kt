@@ -582,46 +582,37 @@ open class BatoToV4(
             .map(::chapterFromElement)
     }
 
-    // V4 uses client-side rendering, so we look for chapter elements via q:key or fallback to old structure
-    override fun chapterListSelector() = "div[q:key] a[href*=\"-ch-\"], div.main div.p-2"
+    // V4 site uses q:key attributes like search results
+    // Chapter elements are within elements that have q:key attributes
+    override fun chapterListSelector() = "[q:key] a[href*=\"-ch-\"]"
 
     override fun chapterFromElement(element: Element): SChapter {
         val chapter = SChapter.create()
         
-        // Check if element is already a link or contains a link
-        val urlElement = if (element.tagName() == "a") {
-            element
-        } else {
-            element.selectFirst("a.chapt") ?: element.selectFirst("a[href*=\"-ch-\"]") ?: element.selectFirst("a")
+        chapter.setUrlWithoutDomain(element.attr("href"))
+        
+        // Get chapter name from link text or title attribute
+        chapter.name = element.text().ifBlank { 
+            element.attr("title").ifBlank { "Chapter" }
         }
         
-        if (urlElement == null) {
-            throw IllegalStateException("No chapter link found in element")
+        // Try to find scanlator/group info in the parent structure
+        val parent = element.parent()
+        val grandparent = parent?.parent()
+        
+        // Look for scanlator link (any link that's not a chapter link)
+        val scanlatorElement = grandparent?.selectFirst("a:not([href*=\"-ch-\"])")
+            ?: parent?.selectFirst("a:not([href*=\"-ch-\"])")
+        chapter.scanlator = scanlatorElement?.text()?.takeIf { it.isNotBlank() } ?: "Unknown"
+        
+        // Look for time/date info
+        val timeElement = grandparent?.selectFirst("i, time")
+            ?: parent?.selectFirst("i, time")
+        val timeText = timeElement?.text()
+        if (!timeText.isNullOrBlank()) {
+            chapter.date_upload = parseChapterDate(timeText)
         }
         
-        chapter.setUrlWithoutDomain(urlElement.attr("href"))
-        chapter.name = urlElement.text().takeIf { it.isNotBlank() } 
-            ?: urlElement.attr("title")
-            ?: "Chapter"
-        
-        // Try old structure first (div.p-2), then new structure
-        val group = element.select("div.extra > a:not(.ps-3)").text().takeIf { it.isNotBlank() }
-            ?: element.select("a:not([href*=\"-ch-\"])").firstOrNull()?.text()
-        
-        val user = element.select("div.extra > a.ps-3").text().takeIf { it.isNotBlank() }
-        
-        val time = element.select("div.extra > i.ps-3").text().takeIf { it.isNotBlank() }
-            ?: element.select("i, time, [data-time], .time").firstOrNull()?.text()
-        
-        chapter.scanlator = when {
-            !group.isNullOrBlank() -> group
-            !user.isNullOrBlank() -> user
-            else -> "Unknown"
-        }
-        
-        if (!time.isNullOrBlank()) {
-            chapter.date_upload = parseChapterDate(time)
-        }
         return chapter
     }
 
