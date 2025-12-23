@@ -582,22 +582,29 @@ open class BatoToV4(
             .map(::chapterFromElement)
     }
 
-    override fun chapterListSelector() = "div.main div.p-2"
+    override fun chapterListSelector() = "div[data-name=\"chapter-list\"] > div:nth-child(2) > div > div.group > div"
 
     override fun chapterFromElement(element: Element): SChapter {
         val chapter = SChapter.create()
-        val urlElement = element.select("a.chapt")
-        val group = element.select("div.extra > a:not(.ps-3)").text()
-        val user = element.select("div.extra > a.ps-3").text()
-        val time = element.select("div.extra > i.ps-3").text()
-        chapter.setUrlWithoutDomain(urlElement.attr("href"))
-        chapter.name = urlElement.text()
-        chapter.scanlator = when {
-            group.isNotBlank() -> group
-            user.isNotBlank() -> user
-            else -> "Unknown"
+        // Try to find the chapter link - could be in various structures
+        val urlElement = element.selectFirst("a[href*=\"-ch-\"]") ?: element.selectFirst("a")
+        if (urlElement == null) {
+            // If no link found, this might not be a valid chapter element
+            throw IllegalStateException("No chapter link found in element")
         }
-        if (time != "") {
+        
+        chapter.setUrlWithoutDomain(urlElement.attr("href"))
+        chapter.name = urlElement.text().takeIf { it.isNotBlank() } 
+            ?: urlElement.attr("title")
+            ?: "Chapter"
+        
+        // Try to find scanlator/group info - structure might vary
+        val group = element.select("a:not([href*=\"-ch-\"])").firstOrNull()?.text()
+        val time = element.select("i, time, [data-time], .time").firstOrNull()?.text()
+        
+        chapter.scanlator = group?.takeIf { it.isNotBlank() } ?: "Unknown"
+        
+        if (!time.isNullOrBlank()) {
             chapter.date_upload = parseChapterDate(time)
         }
         return chapter
@@ -784,8 +791,8 @@ open class BatoToV4(
 
     companion object {
         private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
-        private val seriesUrlRegex = Regex("""(.*/series/\d+)/.*""")
-        private val seriesIdRegex = Regex("""series/(\d+)""")
+        private val seriesUrlRegex = Regex("""(.*/(series|title)/\d+[^/]*).*""")
+        private val seriesIdRegex = Regex("""(?:series|title)/(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"
         private const val MIRROR_PREF_TITLE = "Mirror"
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
