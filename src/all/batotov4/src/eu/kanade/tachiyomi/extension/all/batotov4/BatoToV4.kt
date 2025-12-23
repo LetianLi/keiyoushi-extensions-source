@@ -582,14 +582,20 @@ open class BatoToV4(
             .map(::chapterFromElement)
     }
 
-    override fun chapterListSelector() = "div[data-name=\"chapter-list\"] > div:nth-child(2) > div > div.group > div"
+    // V4 uses client-side rendering, so we look for chapter elements via q:key or fallback to old structure
+    override fun chapterListSelector() = "div[q:key] a[href*=\"-ch-\"], div.main div.p-2"
 
     override fun chapterFromElement(element: Element): SChapter {
         val chapter = SChapter.create()
-        // Try to find the chapter link - could be in various structures
-        val urlElement = element.selectFirst("a[href*=\"-ch-\"]") ?: element.selectFirst("a")
+        
+        // Check if element is already a link or contains a link
+        val urlElement = if (element.tagName() == "a") {
+            element
+        } else {
+            element.selectFirst("a.chapt") ?: element.selectFirst("a[href*=\"-ch-\"]") ?: element.selectFirst("a")
+        }
+        
         if (urlElement == null) {
-            // If no link found, this might not be a valid chapter element
             throw IllegalStateException("No chapter link found in element")
         }
         
@@ -598,11 +604,20 @@ open class BatoToV4(
             ?: urlElement.attr("title")
             ?: "Chapter"
         
-        // Try to find scanlator/group info - structure might vary
-        val group = element.select("a:not([href*=\"-ch-\"])").firstOrNull()?.text()
-        val time = element.select("i, time, [data-time], .time").firstOrNull()?.text()
+        // Try old structure first (div.p-2), then new structure
+        val group = element.select("div.extra > a:not(.ps-3)").text().takeIf { it.isNotBlank() }
+            ?: element.select("a:not([href*=\"-ch-\"])").firstOrNull()?.text()
         
-        chapter.scanlator = group?.takeIf { it.isNotBlank() } ?: "Unknown"
+        val user = element.select("div.extra > a.ps-3").text().takeIf { it.isNotBlank() }
+        
+        val time = element.select("div.extra > i.ps-3").text().takeIf { it.isNotBlank() }
+            ?: element.select("i, time, [data-time], .time").firstOrNull()?.text()
+        
+        chapter.scanlator = when {
+            !group.isNullOrBlank() -> group
+            !user.isNullOrBlank() -> user
+            else -> "Unknown"
+        }
         
         if (!time.isNullOrBlank()) {
             chapter.date_upload = parseChapterDate(time)
